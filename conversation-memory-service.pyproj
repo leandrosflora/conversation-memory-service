@@ -4,13 +4,15 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>c7f5b0a2-7248-4955-b058-42fb1c17eec7</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>conversation_memory_service.py</StartupFile>
+    <StartupFile>app\main.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
     <Name>conversation-memory-service</Name>
     <RootNamespace>conversation-memory-service</RootNamespace>
+    <TestFramework>Pytest</TestFramework>
+    <InterpreterId>MSBuild|.venv|$(MSBuildProjectFullPath)</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -21,7 +23,46 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="conversation_memory_service.py" />
+    <Compile Include="app\__init__.py" />
+    <Compile Include="app\main.py" />
+    <Compile Include="app\config.py" />
+    <Compile Include="app\db.py" />
+    <Compile Include="app\errors.py" />
+    <Compile Include="app\models.py" />
+    <Compile Include="app\logging_setup.py" />
+    <Compile Include="app\api\__init__.py" />
+    <Compile Include="app\api\sessions.py" />
+    <Compile Include="app\api\messages.py" />
+    <Compile Include="app\api\memory.py" />
+    <Compile Include="app\repositories\__init__.py" />
+    <Compile Include="app\repositories\session_store.py" />
+    <Compile Include="app\repositories\message_history.py" />
+    <Compile Include="app\repositories\memory_facts.py" />
+    <Compile Include="tests\test_sessions.py" />
+    <Compile Include="tests\test_messages.py" />
+    <Compile Include="tests\test_memory.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="requirements.txt" />
+    <Content Include="requirements-dev.txt" />
+    <Content Include="pyproject.toml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="app\" />
+    <Folder Include="app\api\" />
+    <Folder Include="app\repositories\" />
+    <Folder Include="tests\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Interpreter Include=".venv\">
+      <Id>.venv</Id>
+      <Version>3.12</Version>
+      <Description>.venv (Python 3.12 (64-bit))</Description>
+      <InterpreterPath>Scripts\python.exe</InterpreterPath>
+      <WindowsInterpreterPath>Scripts\pythonw.exe</WindowsInterpreterPath>
+      <PathEnvironmentVariable>PYTHONPATH</PathEnvironmentVariable>
+      <Architecture>X64</Architecture>
+    </Interpreter>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
