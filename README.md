@@ -67,7 +67,7 @@ O serviço usa `pydantic-settings`, com suporte a variáveis de ambiente.
 |---|---:|---|
 | `REDIS_URL` | `redis://localhost:6379/0` | String de conexão do Redis. |
 | `SESSION_TTL_SECONDS` | `1800` | TTL padrão da sessão ativa (mesmo valor do `Session:TtlMinutes=30` do Orchestrator). |
-| `MONGODB_URI` | `mongodb://conversational_ai_app:conversational_ai_app@localhost:27017/conversational_ai` | String de conexão do MongoDB (usuário de app com `readWrite`, não root). |
+| `MONGODB_URI` | `mongodb://conversational_ai_app:conversational_ai_app@localhost:27018/conversational_ai` | String de conexão do MongoDB (usuário de app com `readWrite`, não root). Porta `27018`, não a `27017` padrão — ver nota no `docker-compose.yml`/runbook sobre conflito com um `mongod.exe` nativo do Windows nesta máquina. |
 | `MONGODB_DATABASE` | `conversational_ai` | Nome do banco. |
 | `OTEL_OTLP_ENDPOINT` | `http://localhost:4317` | Endpoint OTLP para tracing (Jaeger). |
 

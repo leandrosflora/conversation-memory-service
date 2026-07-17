@@ -11,7 +11,11 @@ class Settings(BaseSettings):
     # how long a conversation stays "active" from a caller's point of view.
     session_ttl_seconds: int = 1800
 
-    mongodb_uri: str = "mongodb://conversational_ai_app:conversational_ai_app@localhost:27017/conversational_ai"
+    # Host port 27018, not 27017: this machine also has a native mongod.exe Windows service
+    # bound to 127.0.0.1:27017, which Windows prioritizes over Docker's port mapping (see
+    # docker-compose.yml's mongodb service comment) - 27017 here would silently connect to
+    # that unrelated, much older MongoDB instead of the one this service actually uses.
+    mongodb_uri: str = "mongodb://conversational_ai_app:conversational_ai_app@localhost:27018/conversational_ai"
     mongodb_database: str = "conversational_ai"
 
     otel_otlp_endpoint: str = "http://localhost:4317"
