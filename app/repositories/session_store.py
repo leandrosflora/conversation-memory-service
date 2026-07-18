@@ -16,12 +16,12 @@ class SessionStore:
         self._default_ttl_seconds = default_ttl_seconds
 
     @staticmethod
-    def _key(conversation_id: str) -> str:
-        return f"session:{conversation_id}"
+    def _key(tenant_id: str, conversation_id: str) -> str:
+        return f"tenant:{tenant_id}:session:{conversation_id}"
 
-    async def get(self, conversation_id: str) -> dict[str, Any] | None:
+    async def get(self, tenant_id: str, conversation_id: str) -> dict[str, Any] | None:
         try:
-            raw = await self._client.get(self._key(conversation_id))
+            raw = await self._client.get(self._key(tenant_id, conversation_id))
         except RedisError as exc:
             raise DatastoreUnavailableError("Redis unavailable") from exc
 
@@ -30,23 +30,31 @@ class SessionStore:
         return json.loads(raw)
 
     async def put(
-        self, conversation_id: str, data: dict[str, Any], ttl_seconds: int | None = None
+        self,
+        tenant_id: str,
+        conversation_id: str,
+        data: dict[str, Any],
+        ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
         payload = {
+            "tenant_id": tenant_id,
             "conversation_id": conversation_id,
             "data": data,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl_seconds
         try:
-            await self._client.set(self._key(conversation_id), json.dumps(payload), ex=ttl)
+            await self._client.set(
+                self._key(tenant_id, conversation_id),
+                json.dumps(payload),
+                ex=ttl,
+            )
         except RedisError as exc:
             raise DatastoreUnavailableError("Redis unavailable") from exc
-
         return payload
 
-    async def delete(self, conversation_id: str) -> None:
+    async def delete(self, tenant_id: str, conversation_id: str) -> None:
         try:
-            await self._client.delete(self._key(conversation_id))
+            await self._client.delete(self._key(tenant_id, conversation_id))
         except RedisError as exc:
             raise DatastoreUnavailableError("Redis unavailable") from exc
