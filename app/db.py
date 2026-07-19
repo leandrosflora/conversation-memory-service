@@ -27,7 +27,7 @@ async def ensure_indexes(database: AsyncIOMotorDatabase) -> None:
         [("tenantId", 1), ("externalMessageId", 1)],
         name="ux_conversation_messages_tenant_external_message",
         unique=True,
-        sparse=True,
+        partialFilterExpression={"externalMessageId": {"$type": "string"}},
     )
 
     await messages.create_index("correlationId", sparse=True)
