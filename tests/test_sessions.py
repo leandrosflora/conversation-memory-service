@@ -7,6 +7,7 @@ from app.api.sessions import get_session_store
 from app.errors import DatastoreUnavailableError
 from app.main import app
 from app.repositories.session_store import SessionStore
+from tests.conftest import TENANT_ID
 
 
 @pytest.fixture
@@ -18,19 +19,21 @@ def session_store() -> SessionStore:
 async def client(session_store: SessionStore):
     app.dependency_overrides[get_session_store] = lambda: session_store
     transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-Tenant-Id": TENANT_ID}
+    ) as ac:
         yield ac
     app.dependency_overrides.clear()
 
 
 class BrokenSessionStore:
-    async def get(self, conversation_id: str):
+    async def get(self, tenant_id: str, conversation_id: str):
         raise DatastoreUnavailableError("Redis unavailable")
 
-    async def put(self, conversation_id: str, data, ttl_seconds=None):
+    async def put(self, tenant_id: str, conversation_id: str, data, ttl_seconds=None):
         raise DatastoreUnavailableError("Redis unavailable")
 
-    async def delete(self, conversation_id: str):
+    async def delete(self, tenant_id: str, conversation_id: str):
         raise DatastoreUnavailableError("Redis unavailable")
 
 
@@ -48,7 +51,7 @@ async def test_put_creates_session_with_default_ttl(
     assert response.status_code == 200
     assert response.json()["data"] == {"stage": "greeting"}
 
-    ttl = await session_store._client.ttl("session:conv-1")
+    ttl = await session_store._client.ttl(f"tenant:{TENANT_ID}:session:conv-1")
     assert 0 < ttl <= 1800
 
 
@@ -75,7 +78,7 @@ async def test_put_refreshes_existing_session(client: httpx.AsyncClient):
 async def test_put_honors_explicit_ttl(client: httpx.AsyncClient, session_store: SessionStore):
     await client.put("/sessions/conv-1", json={"data": {"stage": "greeting"}, "ttl_seconds": 5})
 
-    ttl = await session_store._client.ttl("session:conv-1")
+    ttl = await session_store._client.ttl(f"tenant:{TENANT_ID}:session:conv-1")
     assert 0 < ttl <= 5
 
 
@@ -99,7 +102,9 @@ async def test_redis_unavailable_returns_503():
     app.dependency_overrides[get_session_store] = lambda: BrokenSessionStore()
     transport = ASGITransport(app=app)
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", headers={"X-Tenant-Id": TENANT_ID}
+        ) as ac:
             response = await ac.get("/sessions/conv-1")
     finally:
         app.dependency_overrides.clear()

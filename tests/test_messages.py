@@ -10,6 +10,7 @@ from app.db import ensure_indexes
 from app.errors import DatastoreUnavailableError
 from app.main import app
 from app.repositories.message_history import MessageHistoryRepository
+from tests.conftest import TENANT_ID
 
 
 @pytest.fixture
@@ -24,7 +25,9 @@ async def message_history() -> MessageHistoryRepository:
 async def client(message_history: MessageHistoryRepository):
     app.dependency_overrides[get_message_history] = lambda: message_history
     transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-Tenant-Id": TENANT_ID}
+    ) as ac:
         yield ac
     app.dependency_overrides.clear()
 
@@ -40,12 +43,12 @@ class BrokenMessageHistory:
 async def test_append_creates_message_with_server_timestamp(client: httpx.AsyncClient):
     response = await client.post(
         "/conversations/conv-1/messages",
-        json={"tenantId": "t1", "userId": "u1", "role": "user", "content": {"text": "oi"}},
+        json={"tenantId": TENANT_ID, "userId": "u1", "role": "user", "content": {"text": "oi"}},
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert body["tenantId"] == "t1"
+    assert body["tenantId"] == TENANT_ID
     assert body["conversationId"] == "conv-1"
     assert body["role"] == "user"
     assert "createdAt" in body
@@ -64,7 +67,7 @@ async def test_append_with_new_external_message_id_creates(client: httpx.AsyncCl
     response = await client.post(
         "/conversations/conv-1/messages",
         json={
-            "tenantId": "t1",
+            "tenantId": TENANT_ID,
             "role": "user",
             "content": {"text": "oi"},
             "externalMessageId": "wamid.001",
@@ -76,7 +79,7 @@ async def test_append_with_new_external_message_id_creates(client: httpx.AsyncCl
 
 async def test_repeated_append_with_same_external_message_id_is_idempotent(client: httpx.AsyncClient):
     payload = {
-        "tenantId": "t1",
+        "tenantId": TENANT_ID,
         "role": "user",
         "content": {"text": "oi"},
         "externalMessageId": "wamid.001",
@@ -93,15 +96,15 @@ async def test_repeated_append_with_same_external_message_id_is_idempotent(clien
 async def test_list_returns_chronological_order(client: httpx.AsyncClient):
     await client.post(
         "/conversations/conv-1/messages",
-        json={"tenantId": "t1", "role": "user", "content": {"text": "first"}},
+        json={"tenantId": TENANT_ID, "role": "user", "content": {"text": "first"}},
     )
     await asyncio.sleep(0.01)
     await client.post(
         "/conversations/conv-1/messages",
-        json={"tenantId": "t1", "role": "assistant", "content": {"text": "second"}},
+        json={"tenantId": TENANT_ID, "role": "assistant", "content": {"text": "second"}},
     )
 
-    response = await client.get("/conversations/conv-1/messages", params={"tenant_id": "t1"})
+    response = await client.get("/conversations/conv-1/messages", params={"tenant_id": TENANT_ID})
 
     assert response.status_code == 200
     texts = [message["content"]["text"] for message in response.json()]
@@ -112,12 +115,12 @@ async def test_list_limit_bounds_result_set(client: httpx.AsyncClient):
     for text in ["first", "second", "third"]:
         await client.post(
             "/conversations/conv-1/messages",
-            json={"tenantId": "t1", "role": "user", "content": {"text": text}},
+            json={"tenantId": TENANT_ID, "role": "user", "content": {"text": text}},
         )
         await asyncio.sleep(0.01)
 
     response = await client.get(
-        "/conversations/conv-1/messages", params={"tenant_id": "t1", "limit": 1}
+        "/conversations/conv-1/messages", params={"tenant_id": TENANT_ID, "limit": 1}
     )
 
     assert response.status_code == 200
@@ -127,7 +130,7 @@ async def test_list_limit_bounds_result_set(client: httpx.AsyncClient):
 
 
 async def test_list_no_messages_returns_empty_list(client: httpx.AsyncClient):
-    response = await client.get("/conversations/conv-empty/messages", params={"tenant_id": "t1"})
+    response = await client.get("/conversations/conv-empty/messages", params={"tenant_id": TENANT_ID})
 
     assert response.status_code == 200
     assert response.json() == []
@@ -137,10 +140,12 @@ async def test_mongodb_unavailable_returns_503():
     app.dependency_overrides[get_message_history] = lambda: BrokenMessageHistory()
     transport = ASGITransport(app=app)
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", headers={"X-Tenant-Id": TENANT_ID}
+        ) as ac:
             response = await ac.post(
                 "/conversations/conv-1/messages",
-                json={"tenantId": "t1", "role": "user", "content": {"text": "oi"}},
+                json={"tenantId": TENANT_ID, "role": "user", "content": {"text": "oi"}},
             )
     finally:
         app.dependency_overrides.clear()
