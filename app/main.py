@@ -95,8 +95,11 @@ async def health_live() -> dict[str, str]:
 @app.get("/health/ready", include_in_schema=False)
 async def health_ready(request: Request) -> JSONResponse:
     failures: list[str] = []
-    if settings.internal_auth_enabled and not settings.internal_auth_signing_key:
-        failures.append("internal_auth_signing_key_missing")
+    if settings.internal_auth_enabled:
+        for caller in ("conversation-orchestrator", "agent-runtime-renegotiation"):
+            secret = settings.internal_auth_inbound_secrets.get(caller)
+            if not secret or len(secret.encode("utf-8")) < 32:
+                failures.append(f"internal_auth_inbound_secret_missing:{caller}")
     try:
         await request.app.state.redis_client.ping()
     except Exception:
