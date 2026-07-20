@@ -1,20 +1,19 @@
 # Conversation Memory Service
 
-Serviço de memória conversacional da plataforma de IA conversacional: sessão ativa de conversa e histórico/memória de longo prazo, hoje ainda não persistidos por nenhum outro serviço (que mantêm estado apenas em memória de processo).
+Serviço de memória conversacional da plataforma de IA conversacional: sessão ativa de conversa e histórico de mensagens, persistidos e integrados pelo `conversation-orchestrator` e pelo `agent-runtime-renegotiation`. Memória de longo prazo por usuário (`/users/{id}/memory`) está implementada mas ainda sem chamador real — ver "Integrações".
 
-Este serviço expõe uma API HTTP/JSON usada (no papel, per o diagrama C4 — ver "Integrações") pelo `conversation-orchestrator` (sessão) e pelo `agent-runtime-renegotiation` (memória de longo prazo). Persiste sessão ativa no Redis com TTL e histórico de mensagens / fatos de memória no MongoDB, nas coleções já provisionadas em `database/conversational-ai-mongodb-init.js`.
+Este serviço expõe uma API HTTP/JSON autenticada com JWT interno. Persiste sessão ativa no Redis com TTL (chave escopada por tenant) e histórico de mensagens / fatos de memória no MongoDB, nas coleções já provisionadas em `database/conversational-ai-mongodb-init.js`.
 
 ## Visão geral
 
 ```mermaid
 flowchart LR
-    Orchestrator[Conversation Orchestrator] -.->|GET/PUT/DELETE /sessions| Memory[Conversation Memory Service]
-    AgentRuntime[Agent Runtime Renegotiation] -.->|GET/PUT /users/id/memory| Memory
-    Memory -->|sessão ativa, TTL| Redis[(Redis)]
+    Orchestrator[Conversation Orchestrator] -->|GET/PUT /sessions\nvia outbox assíncrono| Memory[Conversation Memory Service]
+    Orchestrator -->|POST /conversations/id/messages\nvia outbox assíncrono| Memory
+    AgentRuntime[Agent Runtime Renegotiation] -->|GET /conversations/id/messages| Memory
+    Memory -->|sessão ativa, TTL, chave por tenant| Redis[(Redis)]
     Memory -->|conversation_messages, agent_memory| Mongo[(MongoDB)]
 ```
-
-> As setas tracejadas (Orchestrator/Agent Runtime → Memory Service) representam o contrato desenhado a partir do C4, não uma integração já implementada — ver "Integrações" abaixo.
 
 ## Stack
 
@@ -37,6 +36,8 @@ flowchart LR
 
 ## Endpoints
 
+Todos exigem `Authorization: Bearer <jwt-interno>` e `X-Tenant-Id: <tenant>` (validado contra a claim assinada). Nos endpoints de `POST`/`PUT` que recebem `tenantId` no corpo, esse valor precisa bater com o `X-Tenant-Id` (`400` se não bater).
+
 ### Sessão (Redis)
 
 | Método | Rota | Descrição |
@@ -44,6 +45,8 @@ flowchart LR
 | `GET` | `/sessions/{conversation_id}` | Retorna `data`/`updated_at` da sessão ativa, ou `404` se não existir/expirou. |
 | `PUT` | `/sessions/{conversation_id}` | Cria/atualiza a sessão (`{"data": {...}, "ttl_seconds": opcional}`), reiniciando o TTL. |
 | `DELETE` | `/sessions/{conversation_id}` | Remove a sessão (idempotente — `204` mesmo se já não existir). |
+
+A chave no Redis é `tenant:{tenant_id}:session:{conversation_id}` — escopada por tenant, não só por conversa.
 
 ### Histórico de mensagens (MongoDB)
 
@@ -59,6 +62,10 @@ flowchart LR
 | `GET` | `/users/{user_id}/memory?tenant_id=...&memory_type=...` | Retorna os `facts` armazenados (lista vazia se não houver, inclusive se expirados). |
 | `PUT` | `/users/{user_id}/memory` | Substitui os `facts` do par `(tenantId, userId, memoryType)`; `ttl_seconds` opcional define `expiresAt`. |
 
+### `GET /health/live`, `GET /health/ready`
+
+Endpoints públicos (não exigem JWT). `/health/ready` verifica a chave de assinatura JWT interna, o Redis e o MongoDB.
+
 ## Configuração
 
 O serviço usa `pydantic-settings`, com suporte a variáveis de ambiente.
@@ -70,6 +77,8 @@ O serviço usa `pydantic-settings`, com suporte a variáveis de ambiente.
 | `MONGODB_URI` | `mongodb://conversational_ai_app:conversational_ai_app@localhost:27018/conversational_ai` | String de conexão do MongoDB (usuário de app com `readWrite`, não root). Porta `27018`, não a `27017` padrão — ver nota no `docker-compose.yml`/runbook sobre conflito com um `mongod.exe` nativo do Windows nesta máquina. |
 | `MONGODB_DATABASE` | `conversational_ai` | Nome do banco. |
 | `OTEL_OTLP_ENDPOINT` | `http://localhost:4317` | Endpoint OTLP para tracing (Jaeger). |
+| `INTERNAL_AUTH_ENABLED` | `true` | Se `false`, os endpoints não exigem JWT (uso local/teste); `X-Tenant-Id` continua obrigatório. |
+| `INTERNAL_AUTH_SIGNING_KEY` | (vazio) | Chave HS256 usada para validar o JWT recebido. Obrigatória com auth habilitada. |
 
 ## Como executar localmente
 
@@ -77,6 +86,7 @@ O serviço usa `pydantic-settings`, com suporte a variáveis de ambiente.
 
 - Python 3.12
 - Redis e MongoDB acessíveis (localmente ou via `docker compose up redis mongodb` no `conversational-ai-demo-arch`)
+- `INTERNAL_AUTH_SIGNING_KEY` com pelo menos 32 bytes, igual ao configurado no `conversation-orchestrator` e no `agent-runtime-renegotiation`
 
 ### Criar ambiente virtual
 
@@ -104,10 +114,16 @@ Swagger: `http://localhost:8600/docs`
 ## Testes
 
 ```bash
-pytest
+python -m pytest
 ```
 
-Os testes usam `fakeredis` e `mongomock-motor`, então rodam sem depender de Redis/MongoDB reais.
+> Use `python -m pytest`, não o script `pytest` isolado — sem o `python -m`, o diretório do projeto não entra no `sys.path` e a suíte inteira falha com `ModuleNotFoundError: No module named 'app'` (é exatamente por isso que o workflow de CI usa `python -m pytest`).
+
+Os testes usam `fakeredis` e `mongomock-motor`, então rodam sem depender de Redis/MongoDB reais. `PlatformMiddleware` é contornado com um fixture `autouse` em `tests/conftest.py` que muta o singleton `app.main.settings` (`internal_auth_enabled=False`) em vez de assinar um JWT de verdade, já que a instância é fixada na app na inicialização e não é resolvida via `Depends` a cada request; cada request de teste ainda passa um `X-Tenant-Id` válido.
+
+## CI
+
+`.github/workflows/ci.yml` roda `pip install`/`python -m pytest` a cada push/PR para `master`.
 
 ## Estrutura
 
@@ -127,23 +143,35 @@ Os testes usam `fakeredis` e `mongomock-motor`, então rodam sem depender de Red
 │   ├── errors.py
 │   ├── logging_setup.py
 │   ├── main.py
-│   └── models.py
+│   ├── models.py
+│   └── platform.py
 ├── tests
+│   └── conftest.py
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
+├── Dockerfile
+├── .github/workflows/ci.yml
 └── conversation-memory-service.pyproj
 ```
 
 ## Integrações
 
-### Conversation Orchestrator / Agent Runtime Renegotiation
+### Conversation Orchestrator
 
-Nenhum dos dois chama este serviço ainda — ambos continuam com sessão/memória em processo (`ConcurrentDictionary`/`IMemoryCache`), perdida a cada restart. O contrato HTTP acima foi definido a partir do C4 (`docs/architecture/C4/c4-container.puml`), não de um client já existente; wireá-los para consumir este serviço é um change futuro.
+Integrado de fato: `ConversationMemoryClient.cs` chama `GET`/`PUT /sessions/{conversationId}` e `POST /conversations/{conversationId}/messages` — mas não de forma síncrona durante o request, e sim como efeitos do outbox transacional (`MemorySaveSession`/`MemoryAppendMessage`), despachados de forma assíncrona pelo `OutboxDispatcherService` depois que `POST /messages` já retornou `202`.
+
+### Agent Runtime Renegotiation
+
+Integrado de fato: `app/context/history.py` chama `GET /conversations/{conversationId}/messages` de forma síncrona antes de montar o prompt do agente, para dar contexto de histórico recente. Indisponibilidade degrada para histórico vazio (não derruba a requisição).
+
+### O que ainda não está integrado
+
+`GET`/`PUT /users/{user_id}/memory` (memória de longo prazo por usuário) está implementado e testado, mas nenhum chamador real o invoca ainda — nem o Orchestrator nem o Agent Runtime persistem fatos de longo prazo hoje. Wireá-lo é um change futuro.
 
 ### Redis / MongoDB
 
-Primeiro serviço deste workspace a se conectar de fato a eles — ambos já estavam provisionados em `docker-compose.yml` (com schema Mongo pronto em `database/conversational-ai-mongodb-init.js`), mas sem nenhum consumidor até este serviço existir.
+Único consumidor de MongoDB do workspace; `whatsapp-bff` também usa Redis (para idempotência de envio outbound), com chaves em um namespace diferente do usado aqui.
 
 ## Observações técnicas
 
@@ -153,6 +181,6 @@ Primeiro serviço deste workspace a se conectar de fato a eles — ambos já est
 
 ## Próximos passos sugeridos
 
-- Integrar `conversation-orchestrator` e `agent-runtime-renegotiation` para de fato chamar este serviço.
+- Integrar `conversation-orchestrator` ou `agent-runtime-renegotiation` com `/users/{id}/memory` (memória de longo prazo), hoje implementado mas sem chamador.
 - Resumo/compactação de histórico ("histórico resumido", per o C4) — hoje o histórico é devolvido bruto.
 - Endpoint de merge/patch de fatos de memória por chave, em vez de substituição total do array.
